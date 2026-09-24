@@ -1,6 +1,22 @@
 import type { Event, PaginatedResponse } from "@/types/event";
 import type { CreateEventFormValues } from "@/lib/schemas/create-event.schema";
 import type {
+  BuyResaleTicketDto,
+  ListTicketForResaleDto,
+  ResaleMarketplaceResponse,
+  ResalePurchaseResult,
+} from "@/types/resale";
+
+export interface BatchTransferEntry {
+  ticketId: string;
+  recipientUserId: string;
+}
+
+export interface BatchTransferResult {
+  success: boolean;
+  transferredCount: number;
+  errors?: string[];
+}
   NotificationPreferences,
   SaveNotificationPreferences,
 } from "@/types/notification-preference";
@@ -185,6 +201,29 @@ export const apiClient = {
       emailOptOut: boolean;
       createdAt: string;
     }>("/users/me"),
+
+  getResaleMarketplace: (params?: Record<string, string>) => {
+    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+    return request<ResaleMarketplaceResponse>(`/resale/marketplace${qs}`);
+  },
+  listTicketForResale: (ticketId, dto: ListTicketForResaleDto) =>
+    request(`/resale/list/${ticketId}`, {
+      method: "POST",
+      body: JSON.stringify(dto),
+    }),
+  buyResaleTicket: (ticketId, dto: BuyResaleTicketDto) =>
+    request<ResalePurchaseResult>(`/resale/buy/${ticketId}`, {
+      method: "POST",
+      body: JSON.stringify(dto),
+    }),
+  cancelResaleListing: (ticketId: string) =>
+    request(`/resale/cancel/${ticketId}`, { method: "POST" }),
+
+  batchTransferTickets: (transfers: BatchTransferEntry[]) =>
+    request<BatchTransferResult>("/tickets/batch-transfer", {
+      method: "POST",
+      body: JSON.stringify({ transfers }),
+    }),
 
   patchMe: (body: { displayName?: string }) =>
     request<{ id: string; displayName: string | null }>("/users/me", {
