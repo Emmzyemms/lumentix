@@ -2454,3 +2454,47 @@ pub fn has_offline_scan_synced(env: &Env, ticket_id: u64) -> bool {
     let key = (OFFLINE_SCAN_PREFIX, ticket_id);
     env.storage().persistent().has(&key)
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Transaction replay protection (Issue #1007)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TX_NONCE_PREFIX: &str = "TXNONCE_";
+const IDEMPOTENCY_KEY_PREFIX: &str = "IDEMKEY_";
+
+/// Returns the next nonce that would be issued to `account`, without
+/// consuming it. Useful for a client to preview the value it should embed
+/// in an idempotency key before submitting a transaction.
+pub fn get_transaction_nonce(env: &Env, account: &Address) -> u64 {
+    let key = (TX_NONCE_PREFIX, account.clone());
+    env.storage().persistent().get(&key).unwrap_or(0)
+}
+
+/// Atomically returns the next nonce for `account` and advances its counter,
+/// so two calls in the same invocation never receive the same value.
+pub fn consume_transaction_nonce(env: &Env, account: &Address) -> u64 {
+    let key = (TX_NONCE_PREFIX, account.clone());
+    let next: u64 = env.storage().persistent().get(&key).unwrap_or(0);
+    env.storage().persistent().set(&key, &(next + 1));
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    next
+}
+
+/// Whether `key` has already been consumed by a prior `consume_idempotency_key`
+/// call, i.e. whether accepting this call again would be a replay.
+pub fn is_idempotency_key_used(env: &Env, key: &BytesN<32>) -> bool {
+    let storage_key = (IDEMPOTENCY_KEY_PREFIX, key.clone());
+    env.storage().persistent().has(&storage_key)
+}
+
+/// Marks `key` as used so a later call with the same key can be rejected as
+/// a replay. Callers should check `is_idempotency_key_used` first.
+pub fn consume_idempotency_key(env: &Env, key: &BytesN<32>) {
+    let storage_key = (IDEMPOTENCY_KEY_PREFIX, key.clone());
+    env.storage().persistent().set(&storage_key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&storage_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}

@@ -485,4 +485,12 @@ pub enum LumentixError {
     PassPackageExhausted = 243,
     /// Requested event is not part of this pass package
     PassPackageEventNotEligible = 244,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Transaction replay protection errors (Issue #1007)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// The supplied idempotency key has already been consumed by a prior call
+    IdempotencyKeyAlreadyUsed = 245,
+    /// The supplied nonce does not match the account's expected next nonce
+    InvalidTransactionNonce = 246,
 }
