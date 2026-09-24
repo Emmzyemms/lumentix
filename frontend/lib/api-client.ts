@@ -1,5 +1,30 @@
 import type { Event, PaginatedResponse } from "@/types/event";
 import type { CreateEventFormValues } from "@/lib/schemas/create-event.schema";
+import type { SponsorTier } from "@/components/SponsorTierCard";
+
+export interface SponsorEventSummary {
+  id: string;
+  title: string;
+  sponsorTiers?: SponsorTier[];
+}
+
+export interface InitiateSponsorshipResult {
+  xdr: string;
+  contributionId: string;
+}
+
+export interface ConfirmSponsorshipResult {
+  rank?: number;
+  transactionHash?: string;
+}
+
+export interface InitiateSponsorshipInput {
+  tierId: string;
+  amount: number;
+  displayName?: string;
+  logoUrl?: string;
+  sponsorPublicKey: string;
+}
 import type {
   BuyResaleTicketDto,
   ListTicketForResaleDto,
@@ -242,6 +267,17 @@ export const apiClient = {
 
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
 
+  getSponsorEvent: (id: string) => request<SponsorEventSummary>(`/events/${id}`),
+  initiateSponsorship: (eventId: string, body: InitiateSponsorshipInput) =>
+    request<InitiateSponsorshipResult>(`/events/${eventId}/sponsors`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  confirmSponsorship: (contributionId: string, signedXdr: string) =>
+    request<ConfirmSponsorshipResult>(`/sponsors/contributions/${contributionId}/confirm`, {
+      method: "POST",
+      body: JSON.stringify({ signedXdr }),
+    }),
   submitReview: (
     body: { eventId: string; ticketId: string; rating: number; comment?: string },
     _token?: string,
