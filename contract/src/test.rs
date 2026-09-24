@@ -4245,7 +4245,7 @@ fn test_reject_replay_attempt_succeeds_once_then_rejects_replay() {
 }
 
 #[test]
-fn test_transfer_ticket_with_idempotency_key_success_updates_owner() {
+fn test_transfer_ticket_idempotent_success_updates_owner() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -4258,14 +4258,14 @@ fn test_transfer_ticket_with_idempotency_key_success_updates_owner() {
     let ticket_id = client.purchase_ticket(&from, &event_id, &100i128);
     let key = BytesN::from_array(&env, &[1u8; 32]);
 
-    client.transfer_ticket_with_idempotency_key(&ticket_id, &from, &to, &key);
+    client.transfer_ticket_idempotent(&ticket_id, &from, &to, &key);
 
     let ticket = client.get_ticket_info(&ticket_id);
     assert_eq!(ticket.owner, to);
 }
 
 #[test]
-fn test_transfer_ticket_with_idempotency_key_rejects_replayed_key() {
+fn test_transfer_ticket_idempotent_rejects_replayed_key() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -4279,13 +4279,13 @@ fn test_transfer_ticket_with_idempotency_key_rejects_replayed_key() {
     let ticket_id = client.purchase_ticket(&first_owner, &event_id, &100i128);
     let key = BytesN::from_array(&env, &[2u8; 32]);
 
-    client.transfer_ticket_with_idempotency_key(&ticket_id, &first_owner, &second_owner, &key);
+    client.transfer_ticket_idempotent(&ticket_id, &first_owner, &second_owner, &key);
 
     // A network retry (or a replay attack) resubmitting the exact same call,
     // including the same idempotency key, must not transfer the ticket
     // again — even to a different `to` address than the first successful
     // call, since the key alone is what's being replay-checked here.
-    let result = client.try_transfer_ticket_with_idempotency_key(
+    let result = client.try_transfer_ticket_idempotent(
         &ticket_id,
         &second_owner,
         &third_owner,

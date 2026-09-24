@@ -38,9 +38,11 @@ use crate::events::{
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
     EventCertificateIssued, CertificationStandardUpdated, UnderagePurchaseRejected,
+    AgeProofIssued, AgeProofVerified,
     BiometricCredentialRegistered, BiometricAuthenticated, BiometricPrivacyUpdated,
     PassPackageCreated, PassAllowanceDeducted,
 };
+use crate::achievement_badge;
 use crate::storage;
 use crate::types::{
     OfflineScanRecord, OfflineScanResult, ValidationProof, WalletSession,
@@ -61,7 +63,7 @@ use crate::types::{
     PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan,
     SubscriptionStatus, SecurityIncident, UserPreferences,
-    CertificationStandard, AgeProof,
+    CertificationStandard, AgeProof, EventCertificate,
     BiometricType, BiometricPrivacyAction, BiometricCredential, PassPackage,
 };
 use crate::validation;
@@ -868,7 +870,7 @@ impl LumentixContract {
     // and tests keep working unchanged. A caller that wants replay
     // protection for a transfer fetches a nonce, derives an idempotency key
     // from it (e.g. hashing the nonce together with the call's arguments),
-    // and calls `transfer_ticket_with_idempotency_key` instead of
+    // and calls `transfer_ticket_idempotent` instead of
     // `transfer_ticket` directly.
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -900,10 +902,85 @@ impl LumentixContract {
         Ok(())
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // Achievement badge NFTs (Issue #1208)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Returns whether `owner` meets any gamification milestone threshold
+    /// (attended 10 events or earned 1,000 loyalty points) and does not
+    /// already hold an active badge. Read-only view.
+    pub fn check_milestone_eligibility(
+        env: Env,
+        owner: Address,
+        events_attended: u32,
+        loyalty_points: u32,
+    ) -> bool {
+        achievement_badge::check_milestone_eligibility(
+            &env,
+            &owner,
+            events_attended,
+            loyalty_points,
+        )
+    }
+
+    /// Mint a soulbound achievement badge for `owner`. The caller must be
+    /// the owner (self-serve claim of a milestone). Fails with
+    /// `BadgeNotEligible` unless a milestone threshold is met and the owner
+    /// does not already hold an active badge.
+    pub fn mint_achievement_badge(
+        env: Env,
+        owner: Address,
+        milestone: String,
+        events_attended: u32,
+        loyalty_points: u32,
+        expires_at: u64,
+    ) -> Result<crate::achievement_badge::AchievementBadge, LumentixError> {
+        owner.require_auth();
+        achievement_badge::mint_achievement_badge(
+            &env,
+            owner,
+            milestone,
+            events_attended,
+            loyalty_points,
+            expires_at,
+        )
+    }
+
+    /// Revoke an expired or invalid badge by ID. Only the platform admin
+    /// can revoke. Returns `BadgeNotFound` for an unknown badge and
+    /// `BadgeAlreadyRevoked` on a repeated revoke.
+    pub fn revoke_expired_badge(
+        env: Env,
+        admin: Address,
+        badge_id: u64,
+    ) -> Result<crate::achievement_badge::AchievementBadge, LumentixError> {
+        admin.require_auth();
+        if storage::get_admin(&env) != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+        achievement_badge::revoke_expired_badge(&env, badge_id)
+    }
+
+    /// Return a single achievement badge by ID, or `BadgeNotFound`.
+    pub fn get_badge(
+        env: Env,
+        badge_id: u64,
+    ) -> Result<crate::achievement_badge::AchievementBadge, LumentixError> {
+        achievement_badge::get_badge(&env, badge_id)
+    }
+
+    /// Return all achievement badges currently held by `owner`.
+    pub fn get_owner_badges(
+        env: Env,
+        owner: Address,
+    ) -> Vec<crate::achievement_badge::AchievementBadge> {
+        achievement_badge::get_owner_badges(&env, &owner)
+    }
+
     /// Same as `transfer_ticket`, but guarded by `reject_replay_attempt` so a
     /// network-retried or replayed call carrying the same `idempotency_key`
     /// is rejected instead of transferring the ticket a second time.
-    pub fn transfer_ticket_with_idempotency_key(
+    pub fn transfer_ticket_idempotent(
         env: Env,
         ticket_id: u64,
         from: Address,
