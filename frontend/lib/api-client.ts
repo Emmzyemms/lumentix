@@ -189,4 +189,22 @@ export const apiClient = {
     }),
 
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+
+  submitReview: (
+    body: { eventId: string; ticketId: string; rating: number; comment?: string },
+    _token?: string,
+  ) =>
+    request<any>("/reviews", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  getMyReviews: (_token?: string) =>
+    request<any>("/reviews/me"),
+
+  getOrganizerReputation: (organizerId: string, _token?: string) =>
+    request<any>(`/reviews/reputation/${organizerId}`),
+
+  getEventSentiment: (eventId: string) =>
+    request<any>(`/reviews/events/${eventId}/sentiment`),
 };
