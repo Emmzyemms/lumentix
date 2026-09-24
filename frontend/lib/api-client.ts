@@ -17,6 +17,9 @@ export interface BatchTransferResult {
   transferredCount: number;
   errors?: string[];
 }
+  NotificationPreferences,
+  SaveNotificationPreferences,
+} from "@/types/notification-preference";
 
 const PROXY_BASE = "/api/proxy";
 
@@ -225,6 +228,15 @@ export const apiClient = {
   patchMe: (body: { displayName?: string }) =>
     request<{ id: string; displayName: string | null }>("/users/me", {
       method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+
+  getNotificationPreferences: () =>
+    request<NotificationPreferences>("/notifications/preferences"),
+
+  saveNotificationPreferences: (body: SaveNotificationPreferences) =>
+    request<NotificationPreferences>("/notifications/preferences", {
+      method: "PUT",
       body: JSON.stringify(body),
     }),
 
