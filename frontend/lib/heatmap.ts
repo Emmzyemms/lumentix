@@ -26,7 +26,7 @@ export interface HeatmapUpdateCallback {
  * Groups positions by their zoneId (or a grid-quantised key when zoneId is
  * absent) and returns a flat array ready for tile generation.
  */
-export function aggregate_scan_positions(
+export function aggregateScanPositions(
   positions: ScanPosition[],
   gridSize = 50,
 ): Array<{ key: string; x: number; y: number; count: number }> {
@@ -55,8 +55,8 @@ export function aggregate_scan_positions(
  * Each tile carries a `density` value between 0 and 1 relative to the
  * maximum bucket count in the current dataset.
  */
-export function generate_heatmap_tiles(
-  aggregated: ReturnType<typeof aggregate_scan_positions>,
+export function generateHeatmapTiles(
+  aggregated: ReturnType<typeof aggregateScanPositions>,
   tileSize = 50,
 ): HeatmapTile[] {
   if (aggregated.length === 0) return [];
@@ -74,7 +74,7 @@ export function generate_heatmap_tiles(
 }
 
 export interface StreamHeatmapOptions {
-  /** Grid tile size in px, forwarded to `generate_heatmap_tiles` (default 50). */
+  /** Grid tile size in px, forwarded to `generateHeatmapTiles` (default 50). */
   tileSize?: number;
   /**
    * Called after each failed poll with the error and the current
@@ -98,7 +98,7 @@ export interface StreamHeatmapOptions {
  *
  * Returns a cleanup function that stops polling.
  */
-export function stream_heatmap_updates(
+export function streamHeatmapUpdates(
   fetchPositions: () => Promise<ScanPosition[]> | ScanPosition[],
   onUpdate: HeatmapUpdateCallback,
   intervalMs = 5000,
@@ -114,8 +114,8 @@ export function stream_heatmap_updates(
     if (!active) return;
     try {
       const positions = await fetchPositions();
-      const aggregated = aggregate_scan_positions(positions);
-      const tiles = generate_heatmap_tiles(aggregated, tileSize);
+      const aggregated = aggregateScanPositions(positions);
+      const tiles = generateHeatmapTiles(aggregated, tileSize);
       consecutiveFailures = 0;
       onUpdate(tiles);
     } catch (err) {

@@ -1,11 +1,72 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { stream_heatmap_updates, type ScanPosition, type HeatmapTile } from '@/lib/heatmap';
+import {
+  aggregateScanPositions,
+  generateHeatmapTiles,
+  streamHeatmapUpdates,
+  type ScanPosition,
+  type HeatmapTile,
+} from '@/lib/heatmap';
 
 function position(x: number, y: number): ScanPosition {
   return { x, y, timestamp: Date.now() };
 }
 
-describe('stream_heatmap_updates', () => {
+describe('heatmap lib', () => {
+  it('exports camelCase function names (issue #1171)', () => {
+    // Guards against the snake_case regression the issue describes.
+    expect(typeof aggregateScanPositions).toBe('function');
+    expect(typeof generateHeatmapTiles).toBe('function');
+    expect(typeof streamHeatmapUpdates).toBe('function');
+  });
+
+  it('aggregates scan positions into per-zone buckets', () => {
+    const aggregated = aggregateScanPositions([
+      { x: 10, y: 20, timestamp: 1, zoneId: 'a' },
+      { x: 15, y: 25, timestamp: 2, zoneId: 'a' },
+      { x: 200, y: 210, timestamp: 3 },
+    ]);
+    expect(aggregated).toContainEqual({ key: 'a', x: 10, y: 20, count: 2 });
+    expect(aggregated).toHaveLength(2);
+  });
+
+  it('generates normalised density tiles relative to the max bucket', () => {
+    const aggregated = aggregateScanPositions([
+      { x: 5, y: 5, timestamp: 1, zoneId: 'busy' },
+      { x: 6, y: 6, timestamp: 2, zoneId: 'busy' },
+      { x: 7, y: 7, timestamp: 3, zoneId: 'busy' },
+      { x: 105, y: 5, timestamp: 4, zoneId: 'quiet' },
+    ]);
+    const tiles = generateHeatmapTiles(aggregated, 50);
+    expect(tiles).toHaveLength(2);
+    const busy = tiles.find((t) => t.x === 5);
+    const quiet = tiles.find((t) => t.x === 105);
+    expect(busy?.density).toBe(1);
+    expect(quiet?.density).toBeCloseTo(1 / 3);
+  });
+
+  it('streams updates and stops on cleanup', async () => {
+    vi.useFakeTimers();
+    const onUpdate = vi.fn();
+    const fetchPositions = vi
+      .fn()
+      .mockResolvedValueOnce([{ x: 1, y: 1, timestamp: 1 }])
+      .mockResolvedValue([{ x: 2, y: 2, timestamp: 2 }]);
+
+    const stop = streamHeatmapUpdates(fetchPositions, onUpdate, 100);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onUpdate).toHaveBeenCalled();
+    const firstCalls = onUpdate.mock.calls.length;
+
+    stop();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onUpdate.mock.calls.length).toBe(firstCalls);
+
+    vi.useRealTimers();
+  });
+});
+
+describe('streamHeatmapUpdates tileSize and backoff', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -23,7 +84,7 @@ describe('stream_heatmap_updates', () => {
     const fetchPositions = vi.fn().mockResolvedValue([position(120, 120)]);
     const onUpdate = vi.fn<(tiles: HeatmapTile[]) => void>();
 
-    const stop = stream_heatmap_updates(fetchPositions, onUpdate, 5000, { tileSize: 40 });
+    const stop = streamHeatmapUpdates(fetchPositions, onUpdate, 5000, { tileSize: 40 });
     await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
 
     const [tiles] = onUpdate.mock.calls[0];
@@ -37,7 +98,7 @@ describe('stream_heatmap_updates', () => {
     const fetchPositions = vi.fn().mockResolvedValue([position(120, 120)]);
     const onUpdate = vi.fn<(tiles: HeatmapTile[]) => void>();
 
-    const stop = stream_heatmap_updates(fetchPositions, onUpdate);
+    const stop = streamHeatmapUpdates(fetchPositions, onUpdate);
     await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
 
     const [tiles] = onUpdate.mock.calls[0];
@@ -53,7 +114,7 @@ describe('stream_heatmap_updates', () => {
     const onUpdate = vi.fn();
     const onError = vi.fn();
 
-    const stop = stream_heatmap_updates(fetchPositions, onUpdate, 1000, { onError });
+    const stop = streamHeatmapUpdates(fetchPositions, onUpdate, 1000, { onError });
 
     await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
     expect(onError).toHaveBeenLastCalledWith(expect.any(Error), 1);
@@ -70,7 +131,7 @@ describe('stream_heatmap_updates', () => {
     const fetchPositions = vi.fn().mockRejectedValue(new Error('network down'));
     const onError = vi.fn();
 
-    const stop = stream_heatmap_updates(fetchPositions, vi.fn(), 1000, {
+    const stop = streamHeatmapUpdates(fetchPositions, vi.fn(), 1000, {
       onError,
       maxBackoffMs: 3000,
     });
@@ -95,7 +156,7 @@ describe('stream_heatmap_updates', () => {
     const onUpdate = vi.fn();
     const onError = vi.fn();
 
-    const stop = stream_heatmap_updates(fetchPositions, onUpdate, 1000, { onError });
+    const stop = streamHeatmapUpdates(fetchPositions, onUpdate, 1000, { onError });
 
     await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
 
@@ -109,7 +170,7 @@ describe('stream_heatmap_updates', () => {
     const fetchPositions = vi.fn().mockResolvedValue([position(10, 10)]);
     const onUpdate = vi.fn();
 
-    const stop = stream_heatmap_updates(fetchPositions, onUpdate, 1000);
+    const stop = streamHeatmapUpdates(fetchPositions, onUpdate, 1000);
     await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
 
     stop();

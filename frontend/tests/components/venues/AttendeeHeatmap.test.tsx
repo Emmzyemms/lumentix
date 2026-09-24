@@ -7,7 +7,7 @@ vi.mock('@/lib/heatmap', async () => {
   const actual = await vi.importActual<typeof import('@/lib/heatmap')>('@/lib/heatmap');
   return {
     ...actual,
-    stream_heatmap_updates: (...args: unknown[]) => {
+    streamHeatmapUpdates: (...args: unknown[]) => {
       streamHeatmapUpdates(...args);
       return () => {};
     },
@@ -19,7 +19,7 @@ describe('AttendeeHeatmap streaming mode', () => {
     streamHeatmapUpdates.mockClear();
   });
 
-  it('forwards its tileSize prop to stream_heatmap_updates (#1147)', () => {
+  it('forwards its tileSize prop to streamHeatmapUpdates (#1147)', () => {
     const fetchPositions = vi.fn().mockResolvedValue([]);
     render(<AttendeeHeatmap fetchPositions={fetchPositions} tileSize={25} intervalMs={1000} />);
 
@@ -38,7 +38,9 @@ describe('AttendeeHeatmap streaming mode', () => {
     const [, , , options] = streamHeatmapUpdates.mock.calls[0];
     options.onError(new Error('down'), 2);
 
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Connection lost'));
-    expect(screen.getByRole('status')).toHaveTextContent('2 failed attempts');
+    const findBanner = () =>
+      screen.getAllByRole('status').find((el) => el.textContent?.includes('Connection lost'));
+    await waitFor(() => expect(findBanner()).toBeDefined());
+    expect(findBanner()).toHaveTextContent('2 failed attempts');
   });
 });
