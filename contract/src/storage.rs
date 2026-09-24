@@ -1,7 +1,6 @@
 use crate::error::LumentixError;
-use crate::error::LumentixError;
 use crate::types::{
-    AccessibilityBooking, AccessibilityInventory, AnonymousSurveyResponse, BridgeTransaction,
+    AccessibilityBooking, AccessibilityInventory, AnonymousSurveyResponse, AgeProof, BridgeTransaction,
     CarbonFootprint,
     CarbonOffsetPurchase, CollectibleInventory, CrossChainLock, CrossChainTransfer, CurrencyConfig,
     EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
@@ -84,6 +83,8 @@ const SCHEDULE_VOTE_PREFIX: &str = "SCHVOTE_";
 const SCHEDULE_VOTE_CAST_PREFIX: &str = "SCHCAST_";
 const PROMO_CODE_PREFIX: &str = "PROMO_";
 const PROMO_USER_USAGE_PREFIX: &str = "PROMOUSR_";
+const AGE_PROOF_PREFIX: &str = "AGEPF_";
+const EVENT_MIN_AGE_PREFIX: &str = "MINAGE_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -392,6 +393,47 @@ pub fn set_event_biometric_required(env: &Env, event_id: u64, required: bool) {
 pub fn is_event_biometric_required(env: &Env, event_id: u64) -> bool {
     let key = (EVENT_BIOMETRIC_REQUIRED_PREFIX, event_id);
     env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Age Verification (Issue #970)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Persist a fresh age proof for `subject`.
+pub fn set_age_proof(env: &Env, subject: &Address, proof: &AgeProof) {
+    let key = (AGE_PROOF_PREFIX, subject.clone());
+    env.storage().persistent().set(&key, proof);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Read the current age proof for `subject`, if any.
+pub fn get_age_proof(env: &Env, subject: &Address) -> Option<AgeProof> {
+    let key = (AGE_PROOF_PREFIX, subject.clone());
+    let proof: Option<AgeProof> = env.storage().persistent().get(&key);
+    if proof.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    proof
+}
+
+/// Set (or clear, with 0) the minimum age required to purchase a ticket to `event_id`.
+pub fn set_event_min_age(env: &Env, event_id: u64, min_age: u32) {
+    let key = (EVENT_MIN_AGE_PREFIX, event_id);
+    env.storage().persistent().set(&key, &min_age);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Minimum age required to purchase a ticket to `event_id`. Returns 0 when no
+/// age restriction is configured.
+pub fn get_event_min_age(env: &Env, event_id: u64) -> u32 {
+    let key = (EVENT_MIN_AGE_PREFIX, event_id);
+    env.storage().persistent().get(&key).unwrap_or(0)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

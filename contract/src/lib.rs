@@ -286,6 +286,7 @@ pub use events::{
     BiometricCredentialRegistered, BiometricAuthenticated, BiometricPrivacyUpdated,
     PassPackageCreated, PassAllowanceDeducted,
     AgeProofIssued, AgeProofVerified, UnderagePurchaseRejected,
+    RoyaltySplitsSet, RoyaltiesDistributed,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};

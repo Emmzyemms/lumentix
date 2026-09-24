@@ -38,6 +38,7 @@ use crate::events::{
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
     EventCertificateIssued, CertificationStandardUpdated, UnderagePurchaseRejected,
+    AgeProofIssued, AgeProofVerified,
     BiometricCredentialRegistered, BiometricAuthenticated, BiometricPrivacyUpdated,
     PassPackageCreated, PassAllowanceDeducted,
 };
@@ -61,7 +62,7 @@ use crate::types::{
     PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan,
     SubscriptionStatus, SecurityIncident, UserPreferences,
-    CertificationStandard, AgeProof,
+    CertificationStandard, EventCertificate, AgeProof,
     BiometricType, BiometricPrivacyAction, BiometricCredential, PassPackage,
 };
 use crate::validation;
@@ -868,7 +869,7 @@ impl LumentixContract {
     // and tests keep working unchanged. A caller that wants replay
     // protection for a transfer fetches a nonce, derives an idempotency key
     // from it (e.g. hashing the nonce together with the call's arguments),
-    // and calls `transfer_ticket_with_idempotency_key` instead of
+    // and calls `transfer_ticket_idempotent` instead of
     // `transfer_ticket` directly.
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -903,7 +904,7 @@ impl LumentixContract {
     /// Same as `transfer_ticket`, but guarded by `reject_replay_attempt` so a
     /// network-retried or replayed call carrying the same `idempotency_key`
     /// is rejected instead of transferring the ticket a second time.
-    pub fn transfer_ticket_with_idempotency_key(
+    pub fn transfer_ticket_idempotent(
         env: Env,
         ticket_id: u64,
         from: Address,
@@ -6732,6 +6733,82 @@ impl LumentixContract {
         }
 
         Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ON-CHAIN ROYALTY SPLITS FOR MULTI-ARTIST EVENTS (Issue #1206)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Configure the royalty split map for an event.
+    ///
+    /// `splits` maps each `artist_address` to a basis-point share; the shares
+    /// must sum to 10 000 (100 %). Only the event's organizer (or the platform
+    /// admin) may configure splits. Calling again replaces the previous map.
+    pub fn set_royalty_splits(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        splits: Map<Address, u32>,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        crate::royalty::set_royalty_splits(&env, event_id, splits)
+    }
+
+    /// Execute a royalty distribution of `total_amount` escrow revenue for an
+    /// event, paying each configured artist their share through the contract's
+    /// settlement token.
+    ///
+    /// Only the event's organizer (or the platform admin) may trigger a
+    /// distribution, and the event must not be cancelled. The distribution
+    /// settles against the event's escrow balance, so it fails with
+    /// `InsufficientEscrow` if the escrow cannot cover `total_amount`.
+    /// Cumulative paid amounts can be inspected via `query_royalty_ledger`.
+    pub fn distribute_royalties(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        total_amount: i128,
+    ) -> Result<Map<Address, i128>, LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        crate::royalty::distribute_royalties(&env, event_id, total_amount)
+    }
+
+    /// Read the cumulative royalties already paid to each artist for an event.
+    /// Returns an empty map when no splits or distributions exist yet.
+    pub fn query_royalty_ledger(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Map<Address, i128>, LumentixError> {
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+        Ok(crate::royalty::query_royalty_ledger(&env, event_id))
     }
 
     // Issue #651: Automated compliance checking

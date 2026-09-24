@@ -1813,3 +1813,65 @@ impl OfflineScansSyncCompleted {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Age Verification (Issue #970)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when a trusted verifier issues an age proof for `subject`.
+pub struct AgeProofIssued;
+
+impl AgeProofIssued {
+    pub fn emit(env: &Env, subject: Address, min_age: u32, expires_at: u64) {
+        env.events()
+            .publish((symbol_short!("ageiss"),), (subject, min_age, expires_at));
+    }
+}
+
+/// Emitted when an age proof is verified on-chain against a minimum age.
+pub struct AgeProofVerified;
+
+impl AgeProofVerified {
+    pub fn emit(env: &Env, subject: Address, min_age_required: u32, valid: bool) {
+        env.events()
+            .publish((symbol_short!("agever"),), (subject, min_age_required, valid));
+    }
+}
+
+/// Emitted when a ticket purchase for an age-restricted event is rejected
+/// because the buyer does not hold a valid age proof.
+pub struct UnderagePurchaseRejected;
+
+impl UnderagePurchaseRejected {
+    pub fn emit(env: &Env, event_id: u64, buyer: Address, min_age: u32) {
+        env.events().publish(
+            (symbol_short!("ageund"),),
+            (event_id, buyer, min_age),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// On-chain royalty splits (Issue #1206)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when royalty splits are configured for an event.
+pub struct RoyaltySplitsSet;
+
+impl RoyaltySplitsSet {
+    pub fn emit(env: &Env, event_id: u64, total_bps: u32) {
+        env.events()
+            .publish((symbol_short!("rystset"),), (event_id, total_bps));
+    }
+}
+
+/// Emitted when a distribution is executed for an event, with the total amount
+/// paid out to artists.
+pub struct RoyaltiesDistributed;
+
+impl RoyaltiesDistributed {
+    pub fn emit(env: &Env, event_id: u64, total_amount: i128) {
+        env.events()
+            .publish((symbol_short!("rydist"),), (event_id, total_amount));
+    }
+}
