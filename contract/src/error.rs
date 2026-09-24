@@ -523,4 +523,14 @@ pub enum LumentixError {
     RoyaltySplitsNotConfigured = 257,
     /// Royalty split basis points must sum to 10 000 (100%)
     InvalidRoyaltySplit = 258,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Achievement badge NFT errors (Issue #1208)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Owner does not meet any milestone threshold for the badge
+    BadgeNotEligible = 259,
+    /// Badge does not exist
+    BadgeNotFound = 260,
+    /// Badge is already revoked
+    BadgeAlreadyRevoked = 261,
 }
