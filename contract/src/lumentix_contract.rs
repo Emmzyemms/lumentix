@@ -860,6 +860,65 @@ impl LumentixContract {
         Ok(())
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // Transaction replay protection (Issue #1007)
+    //
+    // These are additive primitives, kept separate from the existing
+    // `purchase_ticket`/`transfer_ticket` entry points so existing callers
+    // and tests keep working unchanged. A caller that wants replay
+    // protection for a transfer fetches a nonce, derives an idempotency key
+    // from it (e.g. hashing the nonce together with the call's arguments),
+    // and calls `transfer_ticket_with_idempotency_key` instead of
+    // `transfer_ticket` directly.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Returns the caller's next transaction nonce and advances their
+    /// counter, so two calls never receive the same value. A client
+    /// includes this nonce when deriving an idempotency key for a
+    /// subsequent sensitive call, so a network-retried or replayed
+    /// transaction carrying the same key can be rejected.
+    pub fn generate_transaction_nonce(env: Env, account: Address) -> u64 {
+        storage::consume_transaction_nonce(&env, &account)
+    }
+
+    /// Returns whether `key` is still unused (`true`) or has already been
+    /// consumed by a prior `reject_replay_attempt` call (`false`). Read-only
+    /// — does not itself consume the key.
+    pub fn validate_idempotency_key(env: Env, key: BytesN<32>) -> bool {
+        !storage::is_idempotency_key_used(&env, &key)
+    }
+
+    /// Consumes `key`, erroring with `IdempotencyKeyAlreadyUsed` if it has
+    /// already been used. Call this once, before any state changes, at the
+    /// start of an operation that must not be double-applied by a network
+    /// retry or a replayed transaction.
+    pub fn reject_replay_attempt(env: Env, key: BytesN<32>) -> Result<(), LumentixError> {
+        if storage::is_idempotency_key_used(&env, &key) {
+            return Err(LumentixError::IdempotencyKeyAlreadyUsed);
+        }
+        storage::consume_idempotency_key(&env, &key);
+        Ok(())
+    }
+
+    /// Same as `transfer_ticket`, but guarded by `reject_replay_attempt` so a
+    /// network-retried or replayed call carrying the same `idempotency_key`
+    /// is rejected instead of transferring the ticket a second time.
+    pub fn transfer_ticket_with_idempotency_key(
+        env: Env,
+        ticket_id: u64,
+        from: Address,
+        to: Address,
+        idempotency_key: BytesN<32>,
+    ) -> Result<(), LumentixError> {
+        from.require_auth();
+        Self::reject_replay_attempt(env.clone(), idempotency_key)?;
+
+        let mut ticket = storage::get_ticket(&env, ticket_id)?;
+        Self::validate_ticket_transfer(&env, &ticket, &from, true)?;
+        Self::persist_ticket_transfer(&env, ticket_id, &mut ticket, from, to);
+        Ok(())
+    }
+
     /// Return the full ownership transfer history for a ticket.
     /// Each entry records the previous owner, new owner, and ledger timestamp of the transfer.
     /// Returns an empty Vec if the ticket exists but has never been transferred.

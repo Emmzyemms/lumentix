@@ -7,7 +7,8 @@ use crate::storage;
 use crate::types::{EventStatus, Ticket};
 use soroban_sdk::xdr;
 use soroban_sdk::{
-    testutils::Address as _, testutils::Events, testutils::Ledger, token, Address, Env, String,
+    testutils::Address as _, testutils::Events, testutils::Ledger, token, Address, BytesN, Env,
+    String,
 };
 
 fn create_test_contract(env: &Env) -> (Address, LumentixContractClient<'_>) {
@@ -4164,6 +4165,136 @@ fn test_transfer_ticket_double_transfer_succeeds() {
 
     let ticket = client.get_ticket_info(&ticket_id);
     assert_eq!(ticket.owner, third_owner);
+}
+
+// ============================================================================
+// TRANSACTION REPLAY PROTECTION TESTS (Issue #1007)
+// ============================================================================
+
+#[test]
+fn test_generate_transaction_nonce_increments_per_account() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
+
+    let first = client.generate_transaction_nonce(&account);
+    let second = client.generate_transaction_nonce(&account);
+    let third = client.generate_transaction_nonce(&account);
+
+    assert_eq!(first, 0);
+    assert_eq!(second, 1);
+    assert_eq!(third, 2);
+}
+
+#[test]
+fn test_generate_transaction_nonce_is_independent_per_account() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let account_a = Address::generate(&env);
+    let account_b = Address::generate(&env);
+
+    client.generate_transaction_nonce(&account_a);
+    client.generate_transaction_nonce(&account_a);
+
+    // account_b has never been issued a nonce, so it starts at 0 regardless
+    // of account_a's counter.
+    let first_for_b = client.generate_transaction_nonce(&account_b);
+    assert_eq!(first_for_b, 0);
+}
+
+#[test]
+fn test_validate_idempotency_key_true_when_unused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let key = BytesN::from_array(&env, &[7u8; 32]);
+
+    assert!(client.validate_idempotency_key(&key));
+}
+
+#[test]
+fn test_validate_idempotency_key_false_after_reject_replay_attempt() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let key = BytesN::from_array(&env, &[7u8; 32]);
+
+    client.reject_replay_attempt(&key);
+
+    assert!(!client.validate_idempotency_key(&key));
+}
+
+#[test]
+fn test_reject_replay_attempt_succeeds_once_then_rejects_replay() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let key = BytesN::from_array(&env, &[9u8; 32]);
+
+    client.reject_replay_attempt(&key);
+
+    let result = client.try_reject_replay_attempt(&key);
+    assert_eq!(result, Err(Ok(LumentixError::IdempotencyKeyAlreadyUsed)));
+}
+
+#[test]
+fn test_transfer_ticket_with_idempotency_key_success_updates_owner() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&from, &event_id, &100i128);
+    let key = BytesN::from_array(&env, &[1u8; 32]);
+
+    client.transfer_ticket_with_idempotency_key(&ticket_id, &from, &to, &key);
+
+    let ticket = client.get_ticket_info(&ticket_id);
+    assert_eq!(ticket.owner, to);
+}
+
+#[test]
+fn test_transfer_ticket_with_idempotency_key_rejects_replayed_key() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let first_owner = Address::generate(&env);
+    let second_owner = Address::generate(&env);
+    let third_owner = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&first_owner, &event_id, &100i128);
+    let key = BytesN::from_array(&env, &[2u8; 32]);
+
+    client.transfer_ticket_with_idempotency_key(&ticket_id, &first_owner, &second_owner, &key);
+
+    // A network retry (or a replay attack) resubmitting the exact same call,
+    // including the same idempotency key, must not transfer the ticket
+    // again — even to a different `to` address than the first successful
+    // call, since the key alone is what's being replay-checked here.
+    let result = client.try_transfer_ticket_with_idempotency_key(
+        &ticket_id,
+        &second_owner,
+        &third_owner,
+        &key,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::IdempotencyKeyAlreadyUsed)));
+
+    let ticket = client.get_ticket_info(&ticket_id);
+    assert_eq!(ticket.owner, second_owner);
 }
 
 #[test]
