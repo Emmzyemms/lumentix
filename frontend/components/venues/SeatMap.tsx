@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Seat } from "@/types/event";
+import { announceCartUpdate, injectAriaLabels } from "@/lib/a11y";
 import { getAccessToken } from "@/lib/auth/auth";
 
 interface SeatMapProps {
@@ -13,8 +14,7 @@ interface SeatMapProps {
   eventId?: string;
 }
 
-const SEAT_SIZE = 32;
-const SEAT_GAP = 10;
+const SEAT_SIZE = 36;
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 export default function SeatMap(props: SeatMapProps) {
@@ -22,15 +22,21 @@ export default function SeatMap(props: SeatMapProps) {
 
   useEffect(() => setLiveSeats(props.seats), [props.seats]);
 
+  // When an eventId is supplied, keep this section's seats fresh by polling
+  // the backend, so a seat someone else holds/books shows up here shortly
+  // after without a manual refresh.
   useEffect(() => {
     const sectionId = props.seats[0]?.sectionId;
     if (!sectionId || !props.eventId) return;
     const refresh = async () => {
       const token = getAccessToken();
-      const response = await fetch(`${API_URL}/events/${props.eventId}/venues/sections/${sectionId}/seats`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        cache: "no-store",
-      });
+      const response = await fetch(
+        `${API_URL}/events/${props.eventId}/venues/sections/${sectionId}/seats`,
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          cache: "no-store",
+        },
+      );
       if (response.ok) setLiveSeats(await response.json());
     };
     const timer = window.setInterval(refresh, props.refreshIntervalMs ?? 5000);
@@ -40,6 +46,8 @@ export default function SeatMap(props: SeatMapProps) {
   return renderSeatMap({ ...props, seats: liveSeats });
 }
 
+function render_seat_map({ seats, sectionName, onSelectSeat, selectedSeatId }: SeatMapProps) {
+  const rows = [...new Set(seats.map((s) => s.row))].sort((a, b) => a - b);
 export function renderSeatMap({ seats, sectionName, onSelectSeat, selectedSeatId }: SeatMapProps) {
   return <SeatMapCanvas seats={seats} sectionName={sectionName} onSelectSeat={onSelectSeat} selectedSeatId={selectedSeatId} />;
 }
@@ -137,7 +145,7 @@ export default function SeatMap({ seats, sectionName, onSelectSeat, selectedSeat
           aria-label={`Seat map for ${sectionName}`}
         >
           {rows.map((rowNum) => {
-            const rowSeats = seats.filter(s => s.row === rowNum).sort((a, b) => a.number - b.number);
+            const rowSeats = seats.filter((s) => s.row === rowNum).sort((a, b) => a.number - b.number);
             return (
               <div
                 key={rowNum}
@@ -167,8 +175,9 @@ export default function SeatMap({ seats, sectionName, onSelectSeat, selectedSeat
                         aria-label={injectAriaLabels.seat(seat, isSelected)}
                         aria-pressed={isSelected}
                         aria-disabled={!isAvailable}
+                        style={{ width: SEAT_SIZE, height: SEAT_SIZE }}
                         className={`
-                          w-[${SEAT_SIZE}px] h-[${SEAT_SIZE}px] rounded-t-lg text-[9px] font-bold
+                          rounded-t-lg text-[9px] font-bold
                           transition-all duration-200 flex items-center justify-center
                           ${isSelected
                             ? "bg-blue-500 text-white scale-110 shadow-lg shadow-blue-500/30"
