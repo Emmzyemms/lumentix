@@ -8,7 +8,7 @@ use crate::types::{EventStatus, Ticket};
 use soroban_sdk::xdr;
 use soroban_sdk::{
     testutils::Address as _, testutils::Events, testutils::Ledger, token, Address, BytesN, Env,
-    String,
+    Map, String,
 };
 
 fn create_test_contract(env: &Env) -> (Address, LumentixContractClient<'_>) {
@@ -405,7 +405,7 @@ fn test_batch_purchase_ten_tickets_reduces_availability_charges_tokens_and_maps_
     let env = Env::default();
     env.mock_all_auths();
 
-    let (admin, contract_id, client) = create_test_contract_with_id(&env);
+    let (admin, _, client) = create_test_contract_with_id(&env);
     let organizer = Address::generate(&env);
     let buyer = Address::generate(&env);
     let token_admin = Address::generate(&env);
@@ -7419,3 +7419,243 @@ fn test_seat_upgrade_bidding_marketplace() {
     assert_eq!(refunded, 0);
 }
 */
+
+// ============================================================================
+// ON-CHAIN ROYALTY SPLITS (Issue #1206)
+// ============================================================================
+
+#[test]
+fn test_set_royalty_splits_configured_by_organizer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let artist_a = Address::generate(&env);
+    let artist_b = Address::generate(&env);
+    let splits = Map::from_array(&env, [(artist_a.clone(), 6000u32), (artist_b.clone(), 4000u32)]);
+
+    client.set_royalty_splits(&organizer, &event_id, &splits);
+
+    // Configuring splits succeeds; the ledger is still empty until a distribution.
+    assert_eq!(client.query_royalty_ledger(&event_id).len(), 0);
+    let _ = admin;
+}
+
+#[test]
+fn test_set_royalty_splits_returns_correct_ledger_after_distribution() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, _, client) = create_test_contract_with_id(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Configure a settlement token so transfers are executed for real.
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_address = token_contract.address();
+    let token_client = token::Client::new(&env, &token_address);
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+    client.set_token(&admin, &token_address);
+
+    let artist_a = Address::generate(&env);
+    let artist_b = Address::generate(&env);
+    let splits = Map::from_array(&env, [(artist_a.clone(), 6000u32), (artist_b.clone(), 4000u32)]);
+    client.set_royalty_splits(&organizer, &event_id, &splits);
+
+    // Fund the organizer and deposit into the event escrow.
+    token_admin_client.mint(&organizer, &5_000i128);
+    client.deposit_funds(&organizer, &event_id, &1_000i128);
+
+    let distributions = client.distribute_royalties(&organizer, &event_id, &1_000i128);
+
+    assert_eq!(distributions.get(artist_a.clone()).unwrap(), 600i128);
+    assert_eq!(distributions.get(artist_b.clone()).unwrap(), 400i128);
+
+    // Artists were actually paid out of the contract.
+    assert_eq!(token_client.balance(&artist_a), 600i128);
+    assert_eq!(token_client.balance(&artist_b), 400i128);
+
+    // Escrow is depleted after the distribution.
+    assert_eq!(client.get_escrow_balance(&event_id), 0i128);
+
+    // The cumulative ledger reflects the pay-out for later querying.
+    let ledger = client.query_royalty_ledger(&event_id);
+    assert_eq!(ledger.get(artist_a.clone()).unwrap(), 600i128);
+    assert_eq!(ledger.get(artist_b.clone()).unwrap(), 400i128);
+}
+
+#[test]
+fn test_distribute_royalties_rounding_pays_out_exact_total() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_address = token_contract.address();
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+
+    let artist_a = Address::generate(&env);
+    let artist_b = Address::generate(&env);
+    let artist_c = Address::generate(&env);
+    let splits = Map::from_array(
+        &env,
+        [
+            (artist_a.clone(), 1000u32),
+            (artist_b.clone(), 2000u32),
+            (artist_c.clone(), 7000u32),
+        ],
+    );
+    client.set_token(&admin, &token_address);
+    client.set_royalty_splits(&organizer, &event_id, &splits);
+
+    // 1053 * 10% = 105.3 -> 105; * 20% = 210.6 -> 210; * 70% = 737.1 -> 737.
+    // The 1-unit remainder must be credited to the largest share holder.
+    token_admin_client.mint(&organizer, &10_000i128);
+    client.deposit_funds(&organizer, &event_id, &1_053i128);
+
+    let distributions = client.distribute_royalties(&organizer, &event_id, &1_053i128);
+
+    let a = distributions.get(artist_a.clone()).unwrap();
+    let b = distributions.get(artist_b.clone()).unwrap();
+    let c = distributions.get(artist_c.clone()).unwrap();
+    assert_eq!(a, 105i128);
+    assert_eq!(b, 210i128);
+    assert_eq!(c, 738i128);
+    assert_eq!(a + b + c, 1053i128);
+}
+
+#[test]
+fn test_set_royalty_splits_invalid_sum_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let artist_a = Address::generate(&env);
+    let artist_b = Address::generate(&env);
+    let bad = Map::from_array(&env, [(artist_a, 5000u32), (artist_b, 2000u32)]);
+
+    let result = client.try_set_royalty_splits(&organizer, &event_id, &bad);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidRoyaltySplit)));
+}
+
+#[test]
+fn test_set_royalty_splits_unauthorized_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let intruder = Address::generate(&env);
+    let artist_a = Address::generate(&env);
+    let splits = Map::from_array(&env, [(artist_a, 10000u32)]);
+
+    let result = client.try_set_royalty_splits(&intruder, &event_id, &splits);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_set_royalty_splits_event_not_found() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let artist_a = Address::generate(&env);
+    let splits = Map::from_array(&env, [(artist_a, 10000u32)]);
+
+    let result = client.try_set_royalty_splits(&organizer, &999u64, &splits);
+    assert_eq!(result, Err(Ok(LumentixError::EventNotFound)));
+}
+
+#[test]
+fn test_distribute_royalties_without_splits_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.deposit_funds(&organizer, &event_id, &100i128);
+    let result = client.try_distribute_royalties(&organizer, &event_id, &100i128);
+    assert_eq!(result, Err(Ok(LumentixError::RoyaltySplitsNotConfigured)));
+}
+
+#[test]
+fn test_distribute_royalties_insufficient_escrow_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let artist_a = Address::generate(&env);
+    let splits = Map::from_array(&env, [(artist_a, 10000u32)]);
+    client.set_royalty_splits(&organizer, &event_id, &splits);
+
+    client.deposit_funds(&organizer, &event_id, &50i128);
+    let result = client.try_distribute_royalties(&organizer, &event_id, &100i128);
+    assert_eq!(result, Err(Ok(LumentixError::InsufficientEscrow)));
+}
+
+#[test]
+fn test_distribute_royalties_cancelled_event_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let artist_a = Address::generate(&env);
+    let splits = Map::from_array(&env, [(artist_a, 10000u32)]);
+    client.set_royalty_splits(&organizer, &event_id, &splits);
+
+    client.cancel_event(&organizer, &event_id);
+    let result = client.try_distribute_royalties(&organizer, &event_id, &100i128);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
+}
+
+#[test]
+fn test_distribute_royalties_unauthorized_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let intruder = Address::generate(&env);
+    let artist_a = Address::generate(&env);
+    let splits = Map::from_array(&env, [(artist_a, 10000u32)]);
+    client.set_royalty_splits(&organizer, &event_id, &splits);
+
+    let result = client.try_distribute_royalties(&intruder, &event_id, &100i128);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_royalty_ledger_empty_before_any_distribution() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    assert_eq!(client.query_royalty_ledger(&event_id).len(), 0);
+}
