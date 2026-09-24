@@ -37,11 +37,24 @@ export class MailerService {
       this.logger.warn('Missing SMTP configuration environment variables.');
     }
 
+    // Port 465 is implicit TLS and requires `secure: true`; 587/25 use
+    // STARTTLS and expect `secure: false`. An explicit SMTP_SECURE env var
+    // can still override this for providers that don't follow that
+    // convention.
+    const secureOverride = this.configService.get<string>('SMTP_SECURE');
+    const secure = secureOverride !== undefined ? secureOverride === 'true' : port === 465;
+
+    if (port === 465 && !secure) {
+      this.logger.warn(
+        'SMTP_PORT is 465 (implicit TLS) but SMTP_SECURE=false was set explicitly — this will likely fail to connect.',
+      );
+    }
+
     this.transporter = nodemailer.createTransport({
       host,
       port,
       auth: { user, pass },
-      secure: false,
+      secure,
     });
   }
 
