@@ -43,4 +43,14 @@ describe('SeatMap', () => {
     await user.keyboard('{Enter}');
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 's1' }));
   });
+
+  // Regression test for #1146: seat sizing must come from a style/class
+  // Tailwind (or inline CSS) actually applies, not an interpolated
+  // arbitrary-value class name like `w-[${SEAT_SIZE}px]` that the JIT
+  // scanner can never see as a literal string.
+  it('applies a real width/height to each seat button', () => {
+    render(<SeatMap seats={seats} sectionName="Main" onSelectSeat={() => {}} />);
+    const seat = screen.getByTitle('A1 - available');
+    expect(seat).toHaveStyle({ width: '36px', height: '36px' });
+  });
 });
