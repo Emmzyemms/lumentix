@@ -78,6 +78,7 @@ export default function AttendeeHeatmap({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tiles, setTiles] = useState<HeatmapTile[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [consecutiveFailures, setConsecutiveFailures] = useState(0);
   const [announcement, setAnnouncement] = useState('');
 
   // Highest-density zone for quick non-visual scanning near the legend.
@@ -93,6 +94,14 @@ export default function AttendeeHeatmap({
       `Heatmap updated. ${hottest ? `Highest density zone is column ${hottest.tileX + 1}, row ${hottest.tileY + 1} at ${densityLabel(hottest)}.` : ''}`,
     );
   }, [tiles, hottest]);
+
+  // Announce connection loss too, since the visual banner alone wouldn't
+  // reach a screen-reader user.
+  useEffect(() => {
+    if (consecutiveFailures > 0) {
+      setAnnouncement('Heatmap connection lost — retrying.');
+    }
+  }, [consecutiveFailures]);
 
   // Render tiles onto the canvas whenever they change.
   useEffect(() => {
@@ -122,11 +131,16 @@ export default function AttendeeHeatmap({
       (freshTiles) => {
         setTiles(freshTiles);
         setLastUpdated(new Date());
+        setConsecutiveFailures(0);
       },
       intervalMs,
+      {
+        tileSize,
+        onError: (_err, failures) => setConsecutiveFailures(failures),
+      },
     );
     return stop;
-  }, [fetchPositions, intervalMs]);
+  }, [fetchPositions, intervalMs, tileSize]);
 
   // Static mode: compute tiles once from the provided positions array.
   useEffect(() => {
@@ -154,8 +168,9 @@ export default function AttendeeHeatmap({
         </figcaption>
       </figure>
 
-      {/* Live region announcing refresh / density changes (mirrors
-          announceCartUpdate semantics without a document-level region). */}
+      {/* Live region announcing refresh / density changes / connection loss
+          (mirrors announceCartUpdate semantics without a document-level
+          region). */}
       <p className="sr-only" aria-live="polite" aria-atomic="true" role="status">
         {announcement}
       </p>
@@ -167,10 +182,18 @@ export default function AttendeeHeatmap({
         </p>
       )}
 
-      {lastUpdated && (
-        <p className="mt-1 text-right text-xs text-gray-400">
-          Updated {lastUpdated.toLocaleTimeString()}
+      {consecutiveFailures > 0 ? (
+        <p className="mt-1 text-right text-xs text-red-500" role="status">
+          Connection lost — retrying… ({consecutiveFailures} failed attempt
+          {consecutiveFailures > 1 ? 's' : ''})
+          {lastUpdated && ` · last updated ${lastUpdated.toLocaleTimeString()}`}
         </p>
+      ) : (
+        lastUpdated && (
+          <p className="mt-1 text-right text-xs text-gray-400">
+            Updated {lastUpdated.toLocaleTimeString()}
+          </p>
+        )
       )}
 
       {/* Legend */}
