@@ -5,6 +5,13 @@ import { Queue } from 'bull';
 import * as nodemailer from 'nodemailer';
 import { TemplateService } from '../common/mailer/template.service';
 
+export interface SendMailAttachment {
+  filename: string;
+  /** Raw attachment content (e.g. an .ics file's text). */
+  content: string;
+  contentType?: string;
+}
+
 export interface SendMailOptions {
   to: string;
   subject: string;
@@ -14,6 +21,7 @@ export interface SendMailOptions {
   template?: string;
   /** Context variables injected into the Handlebars template. */
   context?: Record<string, unknown>;
+  attachments?: SendMailAttachment[];
 }
 
 @Injectable()
@@ -69,6 +77,11 @@ export class MailerService {
       to: options.to,
       subject: options.subject,
       html,
+      attachments: options.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
     });
   }
 
