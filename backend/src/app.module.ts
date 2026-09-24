@@ -55,6 +55,7 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { TicketDesignModule } from './ticket-design/ticket-design.module';
 import { ScanAnalyticsModule } from './scan-analytics/scan-analytics.module';
 import { TermsOfServiceModule } from './terms-of-service/terms-of-service.module';
+import { IdentityModule } from './identity/identity.module';
 import { FraudDetectionModule } from './fraud-detection/fraud-detection.module';
 import { PassPackagesModule } from './pass-packages/pass-packages.module';
 import { TestingModule } from './testing/testing.module';
@@ -168,6 +169,7 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     TestingModule,
     InternalModule,
     InternalRoutingModule,
+    IdentityModule,
   ],
   controllers: [AppController],
   providers: [
