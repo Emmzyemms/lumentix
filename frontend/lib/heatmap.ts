@@ -73,11 +73,28 @@ export function generate_heatmap_tiles(
   }));
 }
 
+export interface StreamHeatmapOptions {
+  /** Grid tile size in px, forwarded to `generate_heatmap_tiles` (default 50). */
+  tileSize?: number;
+  /**
+   * Called after each failed poll with the error and the current
+   * consecutive-failure count, so a consumer can surface a stale/error
+   * indicator instead of only seeing a `console.error`.
+   */
+  onError?: (error: unknown, consecutiveFailures: number) => void;
+  /** Upper bound for the exponential backoff delay in ms (default intervalMs * 8). */
+  maxBackoffMs?: number;
+}
+
 /**
  * Subscribe to simulated real-time heatmap updates.
  * In a production deployment this would open a WebSocket or SSE connection;
  * here it polls a provided `fetchPositions` function on the given interval
  * and fires `onUpdate` with fresh tiles each cycle.
+ *
+ * On failure, backs off exponentially (capped at `maxBackoffMs`) instead of
+ * retrying at a fixed interval forever, and reports the failure via
+ * `onError` so callers can surface it in the UI.
  *
  * Returns a cleanup function that stops polling.
  */
@@ -85,21 +102,30 @@ export function stream_heatmap_updates(
   fetchPositions: () => Promise<ScanPosition[]> | ScanPosition[],
   onUpdate: HeatmapUpdateCallback,
   intervalMs = 5000,
+  options: StreamHeatmapOptions = {},
 ): () => void {
+  const { tileSize = 50, onError, maxBackoffMs = intervalMs * 8 } = options;
+
   let active = true;
+  let consecutiveFailures = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
   const tick = async () => {
     if (!active) return;
     try {
       const positions = await fetchPositions();
       const aggregated = aggregate_scan_positions(positions);
-      const tiles = generate_heatmap_tiles(aggregated);
+      const tiles = generate_heatmap_tiles(aggregated, tileSize);
+      consecutiveFailures = 0;
       onUpdate(tiles);
     } catch (err) {
+      consecutiveFailures += 1;
       console.error('[heatmap] stream error:', err);
+      onError?.(err, consecutiveFailures);
     }
     if (active) {
-      setTimeout(tick, intervalMs);
+      const delay = Math.min(intervalMs * 2 ** consecutiveFailures, maxBackoffMs);
+      timer = setTimeout(tick, delay);
     }
   };
 
@@ -107,5 +133,6 @@ export function stream_heatmap_updates(
 
   return () => {
     active = false;
+    if (timer !== undefined) clearTimeout(timer);
   };
 }

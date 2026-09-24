@@ -44,6 +44,7 @@ export default function AttendeeHeatmap({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tiles, setTiles] = useState<HeatmapTile[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [consecutiveFailures, setConsecutiveFailures] = useState(0);
 
   // Render tiles onto the canvas whenever they change.
   useEffect(() => {
@@ -73,11 +74,16 @@ export default function AttendeeHeatmap({
       (freshTiles) => {
         setTiles(freshTiles);
         setLastUpdated(new Date());
+        setConsecutiveFailures(0);
       },
       intervalMs,
+      {
+        tileSize,
+        onError: (_err, failures) => setConsecutiveFailures(failures),
+      },
     );
     return stop;
-  }, [fetchPositions, intervalMs]);
+  }, [fetchPositions, intervalMs, tileSize]);
 
   // Static mode: compute tiles once from the provided positions array.
   useEffect(() => {
@@ -98,10 +104,18 @@ export default function AttendeeHeatmap({
         role="img"
         className="rounded-lg border border-gray-200 bg-gray-50"
       />
-      {lastUpdated && (
-        <p className="mt-1 text-right text-xs text-gray-400">
-          Updated {lastUpdated.toLocaleTimeString()}
+      {consecutiveFailures > 0 ? (
+        <p className="mt-1 text-right text-xs text-red-500" role="status">
+          Connection lost — retrying… ({consecutiveFailures} failed attempt
+          {consecutiveFailures > 1 ? 's' : ''})
+          {lastUpdated && ` · last updated ${lastUpdated.toLocaleTimeString()}`}
         </p>
+      ) : (
+        lastUpdated && (
+          <p className="mt-1 text-right text-xs text-gray-400">
+            Updated {lastUpdated.toLocaleTimeString()}
+          </p>
+        )
       )}
       {/* Legend */}
       <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
