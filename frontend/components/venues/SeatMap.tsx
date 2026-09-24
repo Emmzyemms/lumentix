@@ -37,10 +37,10 @@ export default function SeatMap(props: SeatMapProps) {
     return () => window.clearInterval(timer);
   }, [props.eventId, props.refreshIntervalMs, props.seats]);
 
-  return render_seat_map({ ...props, seats: liveSeats });
+  return renderSeatMap({ ...props, seats: liveSeats });
 }
 
-export function render_seat_map({ seats, sectionName, onSelectSeat, selectedSeatId }: SeatMapProps) {
+export function renderSeatMap({ seats, sectionName, onSelectSeat, selectedSeatId }: SeatMapProps) {
   return <SeatMapCanvas seats={seats} sectionName={sectionName} onSelectSeat={onSelectSeat} selectedSeatId={selectedSeatId} />;
 }
 
